@@ -105,6 +105,9 @@ def add_translation_fields(model, opts):
 
     Adds newly created translation fields to the given translation options.
     """
+
+    monitored_fields = getattr(opts, 'monitored_fields', [])
+
     model_empty_values = getattr(opts, 'empty_values', NONE)
     for field_name in opts.local_fields.keys():
         field_empty_value = parse_field(model_empty_values, field_name, NONE)
