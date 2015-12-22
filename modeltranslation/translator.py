@@ -123,10 +123,42 @@ def add_translation_fields(model, opts):
             model.add_to_class(localized_field_name, translation_field)
             opts.add_translation_field(field_name, translation_field)
 
+            # Changes updated
+            if field_name in monitored_fields:
+
+                from django.db.models import DateTimeField
+
+                last_modified_field = DateTimeField(default=timezone.now)
+                modified_localized_name = '{0}_last_modified'.format(localized_field_name)
+                model.add_to_class(modified_localized_name, last_modified_field)
+
+    model_save = model.save
+
+    def new_save(self, **kwargs):
+        if self.pk:
+            db_instance = model._default_manager.get(pk=self.pk)
+            for monitored_field in opts.monitored_fields:
+                for lang in mt_settings.AVAILABLE_LANGUAGES:
+                    localized_field_name = build_localized_fieldname(monitored_field, lang)
+                    # If the field has been modified, then update the modified datetime
+                    if getattr(self, localized_field_name) != getattr(db_instance, localized_field_name):
+                        modified_localized_name = '{0}_last_modified'.format(localized_field_name)
+                        setattr(self, modified_localized_name, timezone.now())
+        return model_save(self, **kwargs)
+
+    model.save = new_save
+
+
     # Rebuild information about parents fields. If there are opts.local_fields, field cache would be
     # invalidated (by model._meta.add_field() function). Otherwise, we need to do it manually.
     if len(opts.local_fields) == 0:
         model._meta._fill_fields_cache()
+
+    # Rebuild information about parents fields. If there are opts.local_fields, field cache would be
+    # invalidated (by model._meta.add_field() function). Otherwise, we need to do it manually.
+    if len(opts.local_fields) == 0:
+        model._meta._fill_fields_cache()
+
 
 
 def add_manager(model):
