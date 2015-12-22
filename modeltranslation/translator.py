@@ -4,6 +4,7 @@ from django.db.models import Manager, ForeignKey, OneToOneField
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_init
 from django.dispatch import receiver
+from django.utils import timezone
 
 from modeltranslation import settings as mt_settings
 from modeltranslation.fields import (NONE, create_translation_field, TranslationFieldDescriptor,
