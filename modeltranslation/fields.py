@@ -3,7 +3,7 @@ from django import VERSION
 from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import fields
-from django.utils import six
+from django.utils import six, timezone
 
 from modeltranslation import settings as mt_settings
 from modeltranslation.utils import (
@@ -291,7 +291,17 @@ class TranslationField(object):
         return (field_class, args, kwargs)
 
     def pre_save(self, model_instance, add):
-        import ipdb; ipdb.set_trace()
+        # Here we just saved the translated field, so we have to update the last_modified (if present)
+        if not add and hasattr(model_instance, '{0}_last_modified'.format(self.name)):
+            # Check if this field has changed
+            db_model_instance = model_instance._default_manager.get(pk=model_instance.pk)
+
+            # If the info has changed, we need to update the last_modified field
+            is_dirty = getattr(db_model_instance, self.name) != getattr(model_instance, self.name)
+            if is_dirty:
+                now = timezone.now()
+                setattr(model_instance, '{0}_last_modified'.format(self.name), now)
+
         return super(TranslationField, self).pre_save(model_instance, add)
 
 
