@@ -137,7 +137,8 @@ def add_translation_fields(model, opts):
     """
 
     # AMM
-    monitored_fields = getattr(opts, 'monitored_fields', [])
+    opts.monitored_fields = getattr(opts, 'monitored_fields', opts.local_fields.keys())
+    monitored_fields = opts.monitored_fields
 
     model_empty_values = getattr(opts, 'empty_values', NONE)
     for field_name in opts.local_fields.keys():

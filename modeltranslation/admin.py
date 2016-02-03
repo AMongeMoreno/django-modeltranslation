@@ -93,7 +93,18 @@ class ModelTranslationPanelMixin(object):
         first_index = page * instances_per_page
         last_index = (page + 1) * instances_per_page
 
-        context['queryset'] = self.model.objects.all()[first_index:last_index]
+        queryset = self.get_queryset(request)
+        context['queryset'] = queryset
+
+        # # Get the page and extend the instances with the forms
+        queryset_page = list(self.model.objects.all()[first_index:last_index])
+
+        # Get the formset
+        self.list_editable = list(field_names)
+        FormSet = self.get_changelist_formset(request)
+        formset = context['formset'] = FormSet(queryset=queryset)
+
+        context['forms'] = formset.forms
 
         return TemplateResponse(request, [self.model_translations_template_name],
                                 context, current_app=self.admin_site.name)
