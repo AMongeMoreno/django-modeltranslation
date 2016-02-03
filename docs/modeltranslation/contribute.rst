@@ -43,14 +43,14 @@ to be supported in early development stages of a new Django version, we aim
 to achieve support once it has seen its first release candidate.
 
 The supported Python versions can be derived from the supported Django versions.
-Example where we support Python 2.5, 2.6 and 2.7:
+Example (from the past) where we support Python 2.5, 2.6 and 2.7:
 
  * Django 1.3 (old stable) supports Python 2.5, 2.6, 2.7
  * Django 1.4 (current stable) supports Python 2.5, 2.6, 2.7
  * Django 1.5 (dev) supports Python 2.6, 2.7
 
-Python 3 is currently not supported, but should be added no later than it becomes
-officially supported by Django.
+Python 3 is supported since 0.7 release. Although 0.6 release supported Django 1.5
+(which started Python 3 compliance), it was not Python 3 ready yet.
 
 
 Unittests
@@ -73,7 +73,15 @@ Continuous Integration
 
 The project uses `Travis CI`_ for continuous integration tests. Hooks provided
 by Github are active, so that each push and pull request is automatically run
-against our `Travis CI config`_.
+against our `Travis CI config`_, checking code against different databases,
+Python and Django versions. This includes automatic tracking of test coverage
+through `Coveralls`_.
+
+.. image:: http://img.shields.io/travis/deschler/django-modeltranslation/master.png?style=flat
+    :target: https://travis-ci.org/deschler/django-modeltranslation
+
+.. image:: http://img.shields.io/coveralls/deschler/django-modeltranslation.png?style=flat
+    :target: https://coveralls.io/r/deschler/django-modeltranslation
 
 
 Contributing Documentation
@@ -114,6 +122,7 @@ Please do not use the issue tracker for general questions, we run a dedicated
 .. _Github: https://github.com/deschler/django-modeltranslation
 .. _Travis CI: https://travis-ci.org/deschler/django-modeltranslation
 .. _Travis CI config: https://github.com/deschler/django-modeltranslation/blob/master/.travis.yml
+.. _Coveralls: https://coveralls.io/r/deschler/django-modeltranslation
 .. _reStructuredText: http://docutils.sourceforge.net/rst.html
 .. _Sphinx: http://sphinx-doc.org/
 .. _issue tracker: https://github.com/deschler/django-modeltranslation/issues

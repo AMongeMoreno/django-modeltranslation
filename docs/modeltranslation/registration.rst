@@ -12,7 +12,7 @@ steps:
 
 1. Create a ``translation.py`` in your app directory.
 2. Create a translation option class for every model to translate.
-3. Register the model and the translation option class at the
+3. Register the model and the translation option class at
    ``modeltranslation.translator.translator``.
 
 The modeltranslation application reads the ``translation.py`` file in your
@@ -33,9 +33,9 @@ Instead of a news, this could be any Django model class::
         title = models.CharField(max_length=255)
         text = models.TextField()
 
-In order to tell the modeltranslation app to translate the ``title`` and
-``text`` field, create a ``translation.py`` file in your news app directory and
-add the following::
+In order to tell modeltranslation to translate the ``title`` and ``text`` fields,
+create a ``translation.py`` file in your news app directory and add the
+following::
 
     from modeltranslation.translator import translator, TranslationOptions
     from news.models import News
@@ -49,6 +49,20 @@ Note that this does not require to change the ``News`` model in any way, it's
 only imported. The ``NewsTranslationOptions`` derives from
 ``TranslationOptions`` and provides the ``fields`` attribute. Finally the model
 and its translation options are registered at the ``translator`` object.
+
+.. versionadded:: 0.10
+
+If you prefer, ``register`` is also available as a decorator, much like the
+one Django introduced for its admin in version 1.7. Usage is similar to the
+standard ``register``, just provide arguments as you normally would, except
+the options class which will be the decorated one::
+
+    from modeltranslation.translator import register, TranslationOptions
+    from news.models import News
+
+    @register(News)
+    class NewsTranslationOptions(TranslationOptions):
+        fields = ('title', 'text',)
 
 At this point you are mostly done and the model classes registered for
 translation will have been added some auto-magical fields. The next section
@@ -86,7 +100,7 @@ say it in code::
 Of course multiple inheritance and inheritance chains (A > B > C) also work as
 expected.
 
-.. note:: When upgrading from a previous modeltranslation version, please
+.. note:: When upgrading from a previous modeltranslation version (<0.5), please
     review your ``TranslationOptions`` classes and see if introducing `fields
     inheritance` broke the project (if you had always subclassed
     ``TranslationOptions`` only, there is no risk).
@@ -128,6 +142,29 @@ As these fields are added to the registered model class as fully valid Django
 model fields, they will appear in the db schema for the model although it has
 not been specified on the model explicitly.
 
+.. _register-precautions:
+
+Precautions regarding registration approach
+*******************************************
+
+Be aware that registration approach (as opposed to base-class approach) to
+models translation has a few caveats, though (despite many pros).
+
+First important thing to note is the fact that translatable models are being patched - that means
+their fields list is not final until the modeltranslation code executes. In normal circumstances
+it shouldn't affect anything - as long as ``models.py`` contain only models' related code.
+
+For example: consider a project where a ``ModelForm`` is declared in ``models.py`` just after
+its model. When the file is executed, the form gets prepared - but it will be frozen with
+old fields list (without translation fields). That's because the ``ModelForm`` will be created
+before modeltranslation would add new fields to the model (``ModelForm`` gather fields info at class
+creation time, not instantiation time). Proper solution is to define the form in ``forms.py``,
+which wouldn't be imported alongside with ``models.py`` (and rather imported from views file or
+urlconf).
+
+Generally, for seamless integration with modeltranslation (and as sensible design anyway),
+the ``models.py`` should contain only bare models and model related logic.
+
 .. _db-fields:
 
 Committing fields to database
@@ -146,21 +183,90 @@ fields) and apply it. If not, you can use a little helper:
 :ref:`commands-sync_translation_fields` which can execute schema-ALTERing SQL
 to add new fields. Use either of these two solutions, not both.
 
-If you are adding translation fields to third-party app that is using South,
-things get more complicated. In order to be able to update the app in future,
+If you are adding translation fields to a third-party app that is using South,
+things get more complicated. In order to be able to update the app in the future,
 and to feel comfortable, you should use the ``sync_translation_fields`` command.
 Although it's possible to introduce new fields in a migration, it's nasty and
 involves copying migration files, using ``SOUTH_MIGRATION_MODULES`` setting,
 and passing ``--delete-ghost-migrations`` flag, so we don't recommend it.
 Invoking ``sync_translation_fields`` is plain easier.
 
-Note that all added fields are
-declared ``blank=True`` and ``null=True`` no matter if the original field is
-required or not. In other words - all translations are optional. To populate
-the default translation fields added by the modeltranslation application
-with values from existing database fields, you
-can use the ``update_translation_fields`` command below. See
+Note that all added fields are by default declared ``blank=True`` and
+``null=True`` no matter if the original field is required or not. In other
+words - all translations are optional, unless an explicit option is
+provided - see :ref:`required_langs`.
+
+To populate the default translation fields added by modeltranslation with
+values from existing database fields, you can use the
+``update_translation_fields`` command. See
 :ref:`commands-update_translation_fields` for more info on this.
+
+
+.. _migrations:
+
+Migrations (Django 1.7)
+^^^^^^^^^^^^^^^^^^^^^^^
+
+.. versionadded:: 0.8
+
+Modeltranslation supports the migration system introduced by Django 1.7.
+Besides the normal workflow as described in Django's `Migration docs`_, you
+should do a migration whenever one of the following changes have been made to
+your project:
+
+- Added or removed a language through ``settings.LANGUAGES`` or
+  ``settings.MODELTRANSLATION LANGUAGES``.
+- Registered or unregistered a field through ``TranslationOptions.fields``.
+
+It doesn't matter if you are starting a fresh project or change an existing
+one, it's always:
+
+1. ``python manage.py makemigrations`` to create a new migration with
+   the added or removed fields.
+2. ``python manage.py migrate`` to apply the changes.
+
+.. As opposed to the statement made in :ref:`db-fields`, using the
+.. :ref:`sync_translation_fields <commands-sync_translation_fields>`
+.. management command together with the new migration system is not recommended.
+
+.. note::
+    Support for migrations is implemented through
+    ``fields.TranslationField.deconstruct(self)`` and respects changes to the
+    ``null`` option.
+
+
+.. _required_langs:
+
+Required fields
+---------------
+
+.. versionadded:: 0.8
+
+By default, all translation fields are optional (not required). This can be
+changed using a special attribute on ``TranslationOptions``::
+
+    class NewsTranslationOptions(TranslationOptions):
+        fields = ('title', 'text',)
+        required_languages = ('en', 'de')
+
+It's quite self-explanatory: for German and English, all translation fields are required. For other
+languages - optional.
+
+A more fine-grained control is available::
+
+    class NewsTranslationOptions(TranslationOptions):
+        fields = ('title', 'text',)
+        required_languages = {'de': ('title', 'text'), 'default': ('title',)}
+
+For German, all fields (both ``title`` and ``text``) are required; for all other languages - only
+``title`` is required. The ``'default'`` is optional.
+
+.. note::
+    Requirement is enforced by ``blank=False``. Please remember that it will trigger validation only
+    in modelforms and admin (as always in Django). Manual model validation can be performed via
+    the ``full_clean()`` model method.
+
+    The required fields are still ``null=True``, though.
 
 
 ``TranslationOptions`` attributes reference
@@ -204,6 +310,13 @@ Classes inheriting from ``TranslationOptions`` can have following attributes def
 
         empty_values = ''
         empty_values = {'title': '', 'slug': None, 'desc': 'both'}
+
+.. attribute:: TranslationOptions.required_languages
+
+    Control which translation fields are required. See :ref:`required_langs`. ::
+
+        required_languages = ('en', 'de')
+        required_languages = {'de': ('title','text'), 'default': ('title',)}
 
 
 .. _supported_field_matrix:
@@ -254,3 +367,6 @@ Model Field                     0.4 0.5 0.7
 .. |u| replace:: ?
 
 \* Implicitly supported (as subclass of a supported field)
+
+
+.. _Migration docs: https://docs.djangoproject.com/en/dev/topics/migrations/#workflow

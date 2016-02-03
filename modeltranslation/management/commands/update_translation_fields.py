@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 from django.db.models import F, Q
-from django.core.management.base import NoArgsCommand
+from django.core.management.base import BaseCommand
 
 from modeltranslation.settings import DEFAULT_LANGUAGE
 from modeltranslation.translator import translator
 from modeltranslation.utils import build_localized_fieldname
 
 
-class Command(NoArgsCommand):
+class Command(BaseCommand):
     help = ('Updates empty values of default translation fields using'
             ' values from original fields (in all translated models).')
 
-    def handle_noargs(self, **options):
+    def handle(self, *args, **options):
         verbosity = int(options['verbosity'])
         if verbosity > 0:
             self.stdout.write("Using default language: %s\n" % DEFAULT_LANGUAGE)
@@ -29,5 +29,5 @@ class Command(NoArgsCommand):
                 if field.empty_strings_allowed:
                     q |= Q(**{def_lang_fieldname: ""})
 
-                model.objects.filter(q).rewrite(False).update(
+                model._default_manager.filter(q).rewrite(False).update(
                     **{def_lang_fieldname: F(field_name)})

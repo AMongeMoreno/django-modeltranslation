@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
+from django import VERSION
 from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import fields
+from django.utils import six
 
 from modeltranslation import settings as mt_settings
 from modeltranslation.utils import (
@@ -22,6 +24,7 @@ SUPPORTED_FIELDS = (
     fields.FloatField,
     fields.DecimalField,
     fields.IPAddressField,
+    fields.GenericIPAddressField,
     fields.DateField,
     fields.DateTimeField,
     fields.TimeField,
@@ -30,10 +33,8 @@ SUPPORTED_FIELDS = (
     fields.related.ForeignKey,
     # Above implies also OneToOneField
 )
-try:
-    SUPPORTED_FIELDS += (fields.GenericIPAddressField,)  # Django 1.4+ only
-except AttributeError:
-    pass
+
+NEW_RELATED_API = VERSION >= (1, 9)
 
 
 class NONE:
@@ -98,6 +99,8 @@ class TranslationField(object):
     that needs to be specified when the field is created.
     """
     def __init__(self, translated_field, language, empty_value, *args, **kwargs):
+        from modeltranslation.translator import translator
+
         # Update the dict of this field with the content of the original one
         # This might be a bit radical?! Seems to work though...
         self.__dict__.update(translated_field.__dict__)
@@ -109,25 +112,48 @@ class TranslationField(object):
         if empty_value is NONE:
             self.empty_value = None if translated_field.null else ''
 
-        # Translation are always optional (for now - maybe add some parameters
-        # to the translation options for configuring this)
-
+        # Default behaviour is that all translations are optional
         if not isinstance(self, fields.BooleanField):
             # TODO: Do we really want to enforce null *at all*? Shouldn't this
             # better honour the null setting of the translated field?
             self.null = True
         self.blank = True
 
+        # Take required_languages translation option into account
+        trans_opts = translator.get_options_for_model(self.model)
+        if trans_opts.required_languages:
+            required_languages = trans_opts.required_languages
+            if isinstance(trans_opts.required_languages, (tuple, list)):
+                # All fields
+                if self.language in required_languages:
+                    # self.null = False
+                    self.blank = False
+            else:
+                # Certain fields only
+                # Try current language - if not present, try 'default' key
+                try:
+                    req_fields = required_languages[self.language]
+                except KeyError:
+                    req_fields = required_languages.get('default', ())
+                if self.name in req_fields:
+                    # TODO: We might have to handle the whole thing through the
+                    # FieldsAggregationMetaClass, as fields can be inherited.
+                    # self.null = False
+                    self.blank = False
+
         # Adjust the name of this field to reflect the language
-        self.attname = build_localized_fieldname(self.translated_field.name, self.language)
+        self.attname = build_localized_fieldname(self.translated_field.name, language)
         self.name = self.attname
+        if self.translated_field.db_column:
+            self.db_column = build_localized_fieldname(self.translated_field.db_column, language)
+            self.column = self.db_column
 
         # Copy the verbose name and append a language suffix
         # (will show up e.g. in the admin).
         self.verbose_name = build_localized_verbose_name(translated_field.verbose_name, language)
 
         # ForeignKey support - rewrite related_name
-        if self.rel and self.related and not self.rel.is_hidden():
+        if not NEW_RELATED_API and self.rel and self.related and not self.rel.is_hidden():
             import copy
             current = self.related.get_accessor_name()
             self.rel = copy.copy(self.rel)  # Since fields cannot share the same rel object.
@@ -143,6 +169,21 @@ class TranslationField(object):
             self.rel.field = self  # Django 1.6
             if hasattr(self.rel.to._meta, '_related_objects_cache'):
                 del self.rel.to._meta._related_objects_cache
+        elif NEW_RELATED_API and self.remote_field and not self.remote_field.is_hidden():
+            import copy
+            current = self.remote_field.get_accessor_name()
+            # Since fields cannot share the same rel object:
+            self.remote_field = copy.copy(self.remote_field)
+
+            if self.remote_field.related_name is None:
+                # For implicit related_name use different query field name
+                loc_related_query_name = build_localized_fieldname(
+                    self.related_query_name(), self.language)
+                self.related_query_name = lambda: loc_related_query_name
+            self.remote_field.related_name = build_localized_fieldname(current, self.language)
+            self.remote_field.field = self  # Django 1.6
+            if hasattr(self.remote_field.to._meta, '_related_objects_cache'):
+                del self.remote_field.to._meta._related_objects_cache
 
     # Django 1.5 changed definition of __hash__ for fields to be fine with hash requirements.
     # It spoiled our machinery, since TranslationField has the same creation_counter as its
@@ -160,14 +201,6 @@ class TranslationField(object):
 
     def __hash__(self):
         return hash((self.creation_counter, self.language))
-
-    def get_attname_column(self):
-        attname = self.get_attname()
-        if self.translated_field.db_column:
-            column = build_localized_fieldname(self.translated_field.db_column, self.language)
-        else:
-            column = attname
-        return attname, column
 
     def formfield(self, *args, **kwargs):
         """
@@ -227,6 +260,20 @@ class TranslationField(object):
         else:
             super(TranslationField, self).save_form_data(instance, data)
 
+    def deconstruct(self):
+        name, path, args, kwargs = self.translated_field.deconstruct()
+        if self.null is True:
+            kwargs.update({'null': True})
+        if 'db_column' in kwargs:
+            kwargs['db_column'] = self.db_column
+        return six.text_type(self.name), path, args, kwargs
+
+    def clone(self):
+        from django.utils.module_loading import import_string
+        name, path, args, kwargs = self.deconstruct()
+        cls = import_string(path)
+        return cls(*args, **kwargs)
+
     def south_field_triple(self):
         """
         Returns a suitable description of this field for South.
@@ -242,6 +289,10 @@ class TranslationField(object):
         args, kwargs = introspector(self)
         # That's our definition!
         return (field_class, args, kwargs)
+
+    def pre_save(self, model_instance, add):
+        import ipdb; ipdb.set_trace()
+        return super(TranslationField, self).pre_save(model_instance, add)
 
 
 class TranslationFieldDescriptor(object):

@@ -3,7 +3,8 @@
 var google, django, gettext;
 
 (function () {
-    var jQuery = jQuery || $ || django.jQuery;
+    var jQuery = window.jQuery || $ || django.jQuery;
+
     /* Add a new selector to jQuery that excludes parent items which match a given selector */
     jQuery.expr[':'].parents = function(a, i, m) {
         return jQuery(a).parents(m[3]).length < 1;
@@ -391,7 +392,7 @@ var google, django, gettext;
             // Group normal fields and fields in (existing) stacked inlines
             var grouper = new TranslationFieldGrouper({
                 $fields: $('.mt').filter(
-                    'input:visible, textarea:visible, select:visible').filter(':parents(.tabular)')
+                    'input:visible, textarea:visible, select:visible, iframe').filter(':parents(.tabular)')
             });
             MainSwitch.init(grouper.groupedTranslations, createTabs(grouper.groupedTranslations));
 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import django
 
 
 def autodiscover():
@@ -11,13 +12,19 @@ def autodiscover():
     import sys
     import copy
     from django.conf import settings
-    from django.utils.importlib import import_module
     from django.utils.module_loading import module_has_submodule
     from modeltranslation.translator import translator
     from modeltranslation.settings import TRANSLATION_FILES, DEBUG
 
-    for app in settings.INSTALLED_APPS:
-        mod = import_module(app)
+    if django.VERSION < (1, 7):
+        from django.utils.importlib import import_module
+        mods = [(app, import_module(app)) for app in settings.INSTALLED_APPS]
+    else:
+        from importlib import import_module
+        from django.apps import apps
+        mods = [(app_config.name, app_config.module) for app_config in apps.get_app_configs()]
+
+    for (app, mod) in mods:
         # Attempt to import the app's translation module.
         module = '%s.translation' % app
         before_import_registry = copy.copy(translator._registry)
@@ -74,4 +81,5 @@ def handle_translation_registrations(*args, **kwargs):
     autodiscover()
 
 
-handle_translation_registrations()
+if django.VERSION < (1, 7):
+    handle_translation_registrations()

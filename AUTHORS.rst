@@ -27,6 +27,23 @@ Contributors
 * Konrad Wojas
 * Bas Peschier
 * Oleg Prans
+* Francesc Arpí Roca
+* Mathieu Leplatre
+* Thom Wiggers
+* Warnar Boekkooi
+* Alex Marandon
+* Fabio Caccamo
+* Vladimir Sinitsin
+* Luca Corti
+* Morgan Aubert
+* Mathias Ettinger
+* Daniel Loeb
+* Stephen McDonald
+* Lukas Lundgren
+* zenoamaro
+* oliphunt
+* Venelin Stoykov
+* Stratos Moros
 * And many more ... (if you miss your name here, please let us know!)
 
 .. _django-linguo: https://github.com/zmathew/django-linguo

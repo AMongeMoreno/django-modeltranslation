@@ -10,12 +10,13 @@ You will need to execute this command in two cases:
 Credits: Heavily inspired by django-transmeta's sync_transmeta_db command.
 """
 from optparse import make_option
-from django.conf import settings
-from django.core.management.base import NoArgsCommand
+import django
+from django.core.management.base import BaseCommand
 from django.core.management.color import no_style
 from django.db import connection, transaction
 from django.utils.six import moves
 
+from modeltranslation.settings import AVAILABLE_LANGUAGES
 from modeltranslation.translator import translator
 from modeltranslation.utils import build_localized_fieldname
 
@@ -45,17 +46,17 @@ def print_missing_langs(missing_langs, field_name, model_name):
         field_name, model_name, ", ".join(missing_langs)))
 
 
-class Command(NoArgsCommand):
+class Command(BaseCommand):
     help = ('Detect new translatable fields or new available languages and'
             ' sync database structure. Does not remove columns of removed'
             ' languages or undeclared fields.')
 
-    option_list = NoArgsCommand.option_list + (
+    option_list = BaseCommand.option_list + (
         make_option('--noinput', action='store_false', dest='interactive', default=True,
                     help='Do NOT prompt the user for input of any kind.'),
     )
 
-    def handle_noargs(self, **options):
+    def handle(self, *args, **options):
         """
         Command execution.
         """
@@ -67,10 +68,17 @@ class Command(NoArgsCommand):
         models = translator.get_registered_models(abstract=False)
         for model in models:
             db_table = model._meta.db_table
-            model_full_name = '%s.%s' % (model._meta.app_label, model._meta.module_name)
+            if django.VERSION < (1, 8):
+                model_name = model._meta.module_name
+            else:
+                model_name = model._meta.model_name
+            model_full_name = '%s.%s' % (model._meta.app_label, model_name)
             opts = translator.get_options_for_model(model)
-            for field_name in opts.local_fields.keys():
-                missing_langs = list(self.get_missing_languages(field_name, db_table))
+            for field_name, fields in opts.local_fields.items():
+                # Take `db_column` attribute into account
+                field = list(fields)[0]
+                column_name = field.db_column if field.db_column else field_name
+                missing_langs = list(self.get_missing_languages(column_name, db_table))
                 if missing_langs:
                     found_missing_fields = True
                     print_missing_langs(missing_langs, field_name, model_full_name)
@@ -85,7 +93,8 @@ class Command(NoArgsCommand):
                     else:
                         print('SQL not executed')
 
-        transaction.commit_unless_managed()
+        if django.VERSION < (1, 6):
+            transaction.commit_unless_managed()
 
         if not found_missing_fields:
             print('No new translatable fields detected')
@@ -102,7 +111,7 @@ class Command(NoArgsCommand):
         Gets only missings fields.
         """
         db_table_fields = self.get_table_fields(db_table)
-        for lang_code, lang_name in settings.LANGUAGES:
+        for lang_code in AVAILABLE_LANGUAGES:
             if build_localized_fieldname(field_name, lang_code) not in db_table_fields:
                 yield lang_code
 
@@ -120,9 +129,8 @@ class Command(NoArgsCommand):
             col_type = f.db_type(connection=connection)
             field_sql = [style.SQL_FIELD(qn(f.column)), style.SQL_COLTYPE(col_type)]
             # column creation
-            sql_output.append("ALTER TABLE %s ADD COLUMN %s;" % (qn(db_table), ' '.join(field_sql)))
-            if not f.null and lang == settings.LANGUAGE_CODE:
-                sql_output.append(
-                    ("ALTER TABLE %s MODIFY COLUMN %s %s %s;" % (
-                        qn(db_table), qn(f.column), col_type, style.SQL_KEYWORD('NOT NULL'))))
+            stmt = "ALTER TABLE %s ADD COLUMN %s" % (qn(db_table), ' '.join(field_sql))
+            if not f.null:
+                stmt += " " + style.SQL_KEYWORD('NOT NULL')
+            sql_output.append(stmt + ";")
         return sql_output

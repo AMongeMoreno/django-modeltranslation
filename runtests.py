@@ -2,6 +2,7 @@
 import os
 import sys
 
+import django
 from django.conf import settings
 from django.core.management import call_command
 
@@ -27,26 +28,30 @@ def runtests():
                 'ENGINE': 'django.db.backends.postgresql_psycopg2',
                 'USER': 'postgres',
                 'NAME': 'modeltranslation',
-                'OPTIONS': {
-                    'autocommit': True,
-                }
             })
+            if django.VERSION < (1, 6):
+                DATABASES['default']['OPTIONS'] = {'autocommit': True}
 
         # Configure test environment
         settings.configure(
-            DATABASES = DATABASES,
-            INSTALLED_APPS = (
+            DATABASES=DATABASES,
+            INSTALLED_APPS=(
+                'django.contrib.contenttypes',
+                'django.contrib.auth',
                 'modeltranslation',
             ),
-            ROOT_URLCONF = None, # tests override urlconf, but it still needs to be defined
-            LANGUAGES = (
+            ROOT_URLCONF=None,  # tests override urlconf, but it still needs to be defined
+            LANGUAGES=(
                 ('en', 'English'),
             ),
+            MIDDLEWARE_CLASSES=(),
         )
 
+    if django.VERSION >= (1, 7):
+        django.setup()
     failures = call_command(
-        'test', 'modeltranslation', interactive=False, failfast=False,
-        verbosity=2)
+        'test', 'modeltranslation', interactive=False, failfast=False, verbosity=2)
+
     sys.exit(bool(failures))
 
 
