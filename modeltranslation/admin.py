@@ -2,6 +2,7 @@
 from copy import deepcopy
 
 import django
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.options import BaseModelAdmin, flatten_fieldsets, InlineModelAdmin
 from django import forms
@@ -23,8 +24,88 @@ from modeltranslation.utils import (
     get_language_bidi, unique)
 from modeltranslation.widgets import ClearableWidgetWrapper
 
+# ##################################################################
+# ##################################################################
+# ###################### Translation panel #########################
+# ##################################################################
+# ##################################################################
+from django.conf.urls import patterns, url
+from django.template.response import TemplateResponse
 
-class TranslationBaseModelAdmin(BaseModelAdmin):
+
+class ModelTranslationPanelMixin(object):
+
+    model_translations_template_name = 'admin/modeltranslation/model_translations.html'
+
+    translation_field_order = None
+
+    def get_model_info(self):
+        # module_name is renamed to model_name in Django 1.8
+        app_label = self.model._meta.app_label
+        try:
+            return (app_label, self.model._meta.model_name,)
+        except AttributeError:
+            return (app_label, self.model._meta.module_name,)
+
+    def get_urls(self):
+        urls = super(ModelTranslationPanelMixin, self).get_urls()
+        info = self.get_model_info()
+        my_urls = patterns(
+            '',
+            url(r'^translations/$',
+                self.admin_site.admin_view(self.translations),
+                name='%s_%s_translations' % info),
+        )
+        return my_urls + urls
+
+    # This is the actual view function that will be executed when accessing the panel
+    def translations(self, request, *args, **kwargs):
+        context = {}
+
+        context['opts'] = self.model._meta
+        context['trans_opts'] = self.trans_opts
+
+        context['AVAILABLE_LANGUAGES'] = mt_settings.AVAILABLE_LANGUAGES
+        context['LANGUAGES'] = settings.LANGUAGES
+        context['DEFAULT_LANGUAGE'] = mt_settings.DEFAULT_LANGUAGE
+
+        context['model'] = self.model
+        field_names = self.trans_opts.get_field_names()
+        if self.translation_field_order is not None:
+            field_names = list(self.translation_field_order) + [x for x in field_names if x not in self.translation_field_order]
+
+        context['trans_fields'] = field_names
+        context['trans_monitored_fields'] = self.trans_opts.monitored_fields
+
+        query_parameters = request.GET.copy()
+
+        if 'l' in query_parameters:
+            current_lang = query_parameters.get('l')
+            context['trans_language'] = current_lang
+
+        page = int(query_parameters.get('p', 0))
+        context['page'] = page
+
+        instances_per_page = query_parameters.get('c', 20)
+
+        context['instances_per_page'] = instances_per_page
+
+        first_index = page * instances_per_page
+        last_index = (page + 1) * instances_per_page
+
+        context['queryset'] = self.model.objects.all()[first_index:last_index]
+
+        return TemplateResponse(request, [self.model_translations_template_name],
+                                context, current_app=self.admin_site.name)
+
+
+# ##################################################################
+# ##################################################################
+# ###################### Original content ##########################
+# ##################################################################
+# ##################################################################
+
+class TranslationBaseModelAdmin(ModelTranslationPanelMixin, BaseModelAdmin):
     _orig_was_required = {}
     both_empty_values_fields = ()
 

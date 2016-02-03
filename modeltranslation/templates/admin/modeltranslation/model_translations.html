@@ -1,0 +1,62 @@
+{% extends "admin/base_site.html" %}
+{% load i18n modeltranslation_tags %}
+
+{% block extrastyle %}
+	{{ block.super }}
+	<style type="text/css">
+	
+	.original-field{
+		margin-top: 15px;
+	}
+	.updated{
+		color: green;
+	}
+	.not-updated{
+		color: red;
+	}
+	</style>
+{% endblock extrastyle %}
+
+{% block content %}
+	
+	{# If no language is selected, just present the language selector #}
+	{% if not trans_language %}
+		<div class="full-languages-selector">
+			{% for code in AVAILABLE_LANGUAGES  %}
+				<a href="?l={{ code }}" class="btn btn-default">{{ code }}</a>
+			{% endfor %}
+		</div>
+	{% else %}
+		<div class="languages-selector">
+			{% for code in AVAILABLE_LANGUAGES  %}
+				<a href="?l={{ code }}" class="btn btn-default">{{ code }}</a>
+			{% endfor %}
+		</div>
+		<div class="language-container language-{{ trans_language }}">
+			<h2>{% trans "Translating:" %} {{ trans_language }}</h2>
+			<table class="table table-striped table-bordered table-hover table-condensed">
+				<thead>
+					<th>{{ opts.verbose_name }}</th>
+					{% for field in trans_fields %}
+					<th>{{ field }}</th>
+					{% endfor %}
+				</thead>
+				<tbody>
+				{% for instance in queryset %}
+					<tr>
+						<td>
+							{{ instance }}	
+						</td>
+						{% for field in trans_fields %}
+						<td>
+							<div class="translated-field">{% getattrl instance field trans_language %}</div>
+							<div class="original-field updated">{% getattrl instance field DEFAULT_LANGUAGE %}</div>
+						</td>	
+						{% endfor %}
+					</tr>
+				{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	{% endif %}
+{% endblock content %}

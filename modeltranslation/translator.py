@@ -161,7 +161,7 @@ def add_translation_fields(model, opts):
             # AMM
             # Changes updated
             if field_name in monitored_fields:
-                last_modified_field = DateTimeField(default=timezone.now)
+                last_modified_field = DateTimeField(default=timezone.now, editable=False)
                 modified_localized_name = '{0}_last_modified'.format(localized_field_name)
                 model.add_to_class(modified_localized_name, last_modified_field)
 
