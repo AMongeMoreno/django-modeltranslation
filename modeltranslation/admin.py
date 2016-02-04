@@ -29,8 +29,50 @@ from modeltranslation.widgets import ClearableWidgetWrapper
 # ###################### Translation panel #########################
 # ##################################################################
 # ##################################################################
+import json
 from django.conf.urls import patterns, url
 from django.template.response import TemplateResponse
+from django.core.urlresolvers import reverse
+from django.contrib.admin import SimpleListFilter
+from django.http import HttpResponse
+from modeltranslation.templatetags.modeltranslation_tags import is_uptodate
+from django.utils import timezone
+
+class JSONResponse(HttpResponse):
+    """
+    An HttpResponse that renders its content into JSON.
+    """
+    def __init__(self, data, **kwargs):
+        content = json.dumps(data)
+        kwargs['content_type'] = 'application/json'
+        super(JSONResponse, self).__init__(content, **kwargs)
+
+
+class LanguageFilter(SimpleListFilter):
+    title = 'language'
+    parameter_name = 'lang'
+
+    def lookups(self, request, model_admin):
+        return settings.LANGUAGES
+
+    def queryset(self, request, queryset):
+        return queryset
+
+
+class TranslationStatusFilter(SimpleListFilter):
+    title = 'translation'
+    parameter_name = 'translation'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('updated', _('Updated')),
+            ('missing', _('Missing')),
+            ('not-updated', _('Missing')),
+            ('equal', _('Equal')),
+            )
+
+    def queryset(self, request, queryset):
+        return queryset
 
 
 class ModelTranslationPanelMixin(object):
@@ -52,18 +94,82 @@ class ModelTranslationPanelMixin(object):
         info = self.get_model_info()
         my_urls = patterns(
             '',
+            url(r'^update_translations/$',
+                self.admin_site.admin_view(self.update_translations),
+                name='%s_%s_update_translations' % info),
+            url(r'^process_translations/$',
+                self.admin_site.admin_view(self.process_translations),
+                name='%s_%s_process_translations' % info),
             url(r'^translations/$',
                 self.admin_site.admin_view(self.translations),
                 name='%s_%s_translations' % info),
         )
         return my_urls + urls
 
+    def update_translations(self, request, *args, **kwargs):
+        # We have to save the updated field
+        data = json.loads(request.body)
+
+        current_lang = data['lang']
+
+        field_name = data['name']
+
+        instance = self.model.objects.get(pk=data['instance'])
+
+        last_modified = 'Unknown'
+        if hasattr(instance, '{0}_last_modified'.format(field_name)):
+            now = timezone.now()
+            last_modified = now.strftime('%d-%m-%Y %H:%M:%S')
+            setattr(instance, '{0}_last_modified'.format(field_name), now)
+            instance.save()
+
+        # Get the new status
+        new_status = is_uptodate(instance, field_name, current_lang, mt_settings.DEFAULT_LANGUAGE)
+
+        return JSONResponse({
+            'status': new_status,
+            'instance_id': instance.pk,
+            'field_name': field_name,
+            'last_modified': last_modified,
+            })
+
     # This is the actual view function that will be executed when accessing the panel
-    def translations(self, request, *args, **kwargs):
+    def process_translations(self, request, *args, **kwargs):
+        # We have to save the updated field
+        data = json.loads(request.body)
+
+        current_lang = data['lang']
+
+        field_name = data['name']
+        field_value = data['value']
+
+        instance = self.model.objects.get(pk=data['instance'])
+
+        setattr(instance, field_name, field_value)
+        instance.save()
+
+        last_modified = 'Unknown'
+        if hasattr(instance, '{0}_last_modified'.format(field_name)):
+            last_modified = getattr(instance, '{0}_last_modified'.format(field_name))
+            last_modified = last_modified.strftime('%d-%m-%Y %H:%M:%S')
+
+        # Get the new status
+        new_status = is_uptodate(instance, field_name, current_lang, mt_settings.DEFAULT_LANGUAGE)
+
+        return JSONResponse({
+            'status': new_status,
+            'instance_id': instance.pk,
+            'field_name': field_name,
+            'last_modified': last_modified,
+            })
+
+    def translations(self, request, extra_context=None):
         context = {}
 
         context['opts'] = self.model._meta
         context['trans_opts'] = self.trans_opts
+        info = self.get_model_info()
+        # context['process_url'] = reverse('%s_%s_process_translations' % info)
 
         context['AVAILABLE_LANGUAGES'] = mt_settings.AVAILABLE_LANGUAGES
         context['LANGUAGES'] = settings.LANGUAGES
@@ -79,32 +185,166 @@ class ModelTranslationPanelMixin(object):
 
         query_parameters = request.GET.copy()
 
-        if 'l' in query_parameters:
-            current_lang = query_parameters.get('l')
+        if 'lang' in query_parameters:
+            current_lang = query_parameters.get('lang')
             context['trans_language'] = current_lang
 
-        page = int(query_parameters.get('p', 0))
-        context['page'] = page
+            request.GET = query_parameters
 
-        instances_per_page = query_parameters.get('c', 20)
+            # Get the formset
+            self.list_editable = list(['{0}_{1}'.format(field, current_lang) for field in field_names])
 
-        context['instances_per_page'] = instances_per_page
+        """
+            From django.contrib.admin.options.BaseModelAdmin
+        """
+        from django.contrib.admin.options import *
+        from django.contrib.admin.views.main import ERROR_FLAG
+        from django.utils.translation import ugettext as _
 
-        first_index = page * instances_per_page
-        last_index = (page + 1) * instances_per_page
+        opts = self.model._meta
+        app_label = opts.app_label
+        if not self.has_change_permission(request, None):
+            raise PermissionDenied
 
-        queryset = self.get_queryset(request)
-        context['queryset'] = queryset
+        list_display = self.get_list_display(request)
+        list_display_links = self.get_list_display_links(request, list_display)
+        list_filter = self.get_list_filter(request)
 
-        # # Get the page and extend the instances with the forms
-        queryset_page = list(self.model.objects.all()[first_index:last_index])
+        # Include the language filter as a list_filter
+        list_filter = self.list_filter + (LanguageFilter,)
 
-        # Get the formset
-        self.list_editable = list(field_names)
-        FormSet = self.get_changelist_formset(request)
-        formset = context['formset'] = FormSet(queryset=queryset)
+        # Check actions to see if any are available on this changelist
+        actions = self.get_actions(request)
+        if actions:
+            # Add the action checkboxes if there are any actions available.
+            list_display = ['action_checkbox'] + list(list_display)
 
-        context['forms'] = formset.forms
+        ChangeList = self.get_changelist(request)
+        try:
+            cl = ChangeList(request, self.model, list_display,
+                list_display_links, list_filter, self.date_hierarchy,
+                self.search_fields, self.list_select_related,
+                self.list_per_page, self.list_max_show_all, self.list_editable,
+                self)
+        except IncorrectLookupParameters:
+            # Wacky lookup parameters were given, so redirect to the main
+            # changelist page, without parameters, and pass an 'invalid=1'
+            # parameter via the query string. If wacky parameters were given
+            # and the 'invalid=1' parameter was already in the query string,
+            # something is screwed up with the database, so display an error
+            # page.
+            if ERROR_FLAG in request.GET.keys():
+                return SimpleTemplateResponse('admin/invalid_setup.html', {
+                    'title': _('Database error'),
+                })
+            return HttpResponseRedirect(request.path + '?' + ERROR_FLAG + '=1')
+
+        # If the request was POSTed, this might be a bulk action or a bulk
+        # edit. Try to look up an action or confirmation first, but if this
+        # isn't an action the POST will fall through to the bulk edit check,
+        # below.
+        action_failed = False
+        selected = request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)
+
+        # Actions with no confirmation
+        if (actions and request.method == 'POST' and
+                'index' in request.POST and '_save' not in request.POST):
+            if selected:
+                response = self.response_action(request, queryset=cl.get_queryset(request))
+                if response:
+                    return response
+                else:
+                    action_failed = True
+            else:
+                msg = _("Items must be selected in order to perform "
+                        "actions on them. No items have been changed.")
+                self.message_user(request, msg, messages.WARNING)
+                action_failed = True
+
+        # Actions with confirmation
+        if (actions and request.method == 'POST' and
+                helpers.ACTION_CHECKBOX_NAME in request.POST and
+                'index' not in request.POST and '_save' not in request.POST):
+            if selected:
+                response = self.response_action(request, queryset=cl.get_queryset(request))
+                if response:
+                    return response
+                else:
+                    action_failed = True
+
+        # If we're allowing changelist editing, we need to construct a formset
+        # for the changelist given all the fields to be edited. Then we'll
+        # use the formset to validate/process POSTed data.
+        formset = cl.formset = None
+
+        # Handle POSTed bulk-edit data.
+        if (request.method == "POST" and cl.list_editable and
+                '_save' in request.POST and not action_failed):
+            FormSet = self.get_changelist_formset(request)
+            formset = cl.formset = FormSet(request.POST, request.FILES, queryset=cl.result_list)
+            if formset.is_valid():
+                changecount = 0
+                for form in formset.forms:
+                    if form.has_changed():
+                        obj = self.save_form(request, form, change=True)
+                        self.save_model(request, obj, form, change=True)
+                        self.save_related(request, form, formsets=[], change=True)
+                        change_msg = self.construct_change_message(request, form, None)
+                        self.log_change(request, obj, change_msg)
+                        changecount += 1
+
+                if changecount:
+                    if changecount == 1:
+                        name = force_text(opts.verbose_name)
+                    else:
+                        name = force_text(opts.verbose_name_plural)
+                    msg = ungettext("%(count)s %(name)s was changed successfully.",
+                                    "%(count)s %(name)s were changed successfully.",
+                                    changecount) % {'count': changecount,
+                                                    'name': name,
+                                                    'obj': force_text(obj)}
+                    self.message_user(request, msg, messages.SUCCESS)
+
+                return HttpResponseRedirect(request.get_full_path())
+
+        # Handle GET -- construct a formset for display.
+        elif cl.list_editable:
+            FormSet = self.get_changelist_formset(request)
+            formset = cl.formset = FormSet(queryset=cl.result_list)
+
+        # Build the list of media to be used by the formset.
+        if formset:
+            media = self.media + formset.media
+        else:
+            media = self.media
+
+        # Build the action form and populate it with available actions.
+        if actions:
+            action_form = self.action_form(auto_id=None)
+            action_form.fields['action'].choices = self.get_action_choices(request)
+        else:
+            action_form = None
+
+        selection_note_all = ungettext('%(total_count)s selected',
+            'All %(total_count)s selected', cl.result_count)
+        context.update({
+            'module_name': force_text(opts.verbose_name_plural),
+            'selection_note': _('0 of %(cnt)s selected') % {'cnt': len(cl.result_list)},
+            'selection_note_all': selection_note_all % {'total_count': cl.result_count},
+            'title': cl.title,
+            'is_popup': cl.is_popup,
+            'cl': cl,
+            'media': media,
+            'has_add_permission': self.has_add_permission(request),
+            'opts': cl.opts,
+            'app_label': app_label,
+            'action_form': action_form,
+            'actions_on_top': self.actions_on_top,
+            'actions_on_bottom': self.actions_on_bottom,
+            'actions_selection_counter': self.actions_selection_counter,
+            'preserved_filters': self.get_preserved_filters(request),
+        })
+        context.update(extra_context or {})
 
         return TemplateResponse(request, [self.model_translations_template_name],
                                 context, current_app=self.admin_site.name)

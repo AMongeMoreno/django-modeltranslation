@@ -1,15 +1,113 @@
-{% extends "admin/base_site.html" %}
-{% load i18n modeltranslation_tags pagination_tags admin_list %}
+{% extends "admin/change_list.html" %}
+{% load i18n modeltranslation_tags pagination_tags admin_list admin_urls %}
 
 {% block extrajs %}
-	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.4.7/angular.min.js" />
+	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.4.7/angular.min.js"></script>
 	<script type="text/javascript">
 		// We will include here the angular code necessary.
 		var app = angular.module('translationApp', []);
-
-		app.controller('MainController', ['$scope', function($scope){
-			$scope.message = "Works !";
+		
+		app.config(['$httpProvider', function($httpProvider) {
+		    $httpProvider.defaults.headers.common['X-CSRFToken'] = '{{ csrf_token|escapejs }}';
 		}]);
+
+		app.controller('MainController', ['$scope', '$http', function($scope, $http){
+			$scope.message = "Works !";
+		
+			$scope.saveField = function(instance_id, field_name){
+				// Get the field value
+				var field = angular.element('.instance-' + instance_id + '.field-' + field_name).find('.translated-field').children().first();
+				var value = field.val();
+
+				$http.put('{% url opts|admin_urlname:"process_translations" %}', {
+					'instance': instance_id, 
+					'name': field_name,
+					'value': value,
+					'lang': '{{ trans_language }}',
+				}).then(function(response){
+					// On return, change the status
+					var data = response.data;
+					var field = getField(instance_id, field_name);
+					field.status = data.status;
+					field.lastModified = data.last_modified;
+				});
+			};
+
+			$scope.markAsUpdated = function(instance_id, field_name){
+				// Get the field value
+				var field = angular.element('.instance-' + instance_id + '.field-' + field_name).find('.translated-field').children().first();
+				var value = field.val();
+
+				$http.put('{% url opts|admin_urlname:"update_translations" %}', {
+					'instance': instance_id, 
+					'name': field_name,
+					'lang': '{{ trans_language }}',
+				}).then(function(response){
+					// On return, change the status
+					var data = response.data;
+					var field = getField(instance_id, field_name);
+					field.status = data.status;
+					field.lastModified = data.last_modified;
+
+				});
+			};
+
+			var hiddenDefaultFields = {};
+
+			var getField = function(instance_id, field_name){
+				var instance_fields = {};
+				if (!hiddenDefaultFields.hasOwnProperty(instance_id)){
+					hiddenDefaultFields[instance_id] = instance_fields;
+				}
+				instance_fields = hiddenDefaultFields[instance_id];
+
+				var field = {};
+				if (!instance_fields.hasOwnProperty(field_name)){
+					instance_fields[field_name] = field;	
+				}
+				field = instance_fields[field_name];
+				return field;
+			}
+
+			$scope.fieldStatus = function(instance_id, field_name){
+				var field = getField(instance_id, field_name);
+				return field['status'];
+			};
+
+			$scope.setFieldStatus = function(instance_id, field_name, status){
+				var field = getField(instance_id, field_name);
+				field['status'] = status;
+			};
+
+			$scope.toggleDefault = function(instance_id, field_name){
+				var field = getField(instance_id, field_name);
+				// Set mustShow to the other value
+				field['mustShow'] = ! (field['mustShow'] || false);
+			};
+
+			$scope.mustShowDefault = function(instance_id, field_name){
+				var field = getField(instance_id, field_name);
+				return field['mustShow'] || false;
+			};
+
+			$scope.setLastModified = function(instance_id, field_name, last_modified, last_modified_default){
+				var field = getField(instance_id, field_name);
+				field['lastModified'] = last_modified;
+				field['lastModifiedDefault'] = last_modified_default;
+			};
+
+			$scope.getLastModified = function(instance_id, field_name){
+				var field = getField(instance_id, field_name);
+				return field['lastModified'];
+			};
+
+			$scope.getLastModifiedDefault = function(instance_id, field_name){
+				var field = getField(instance_id, field_name);
+				return field['lastModifiedDefault'];
+			};
+
+		}]);
+
 
 	</script>
 
@@ -19,6 +117,7 @@
 {% block extrastyle %}
 	{{ block.super }}
 	<style type="text/css">
+	[ng:cloak],[ng-cloak],[data-ng-cloak],[x-ng-cloak],.ng-cloak,.x-ng-cloak,.ng-hide:not(.ng-hide-animate){display:none !important;}
 	
 	.original-field{
 		margin-top: 15px;
@@ -45,30 +144,49 @@
 		color: blue;
 	}
 	.equal{
-		background-color: #5fa291 !important;
+		background-color: #9bcf7d !important;
+	}
+
+	.last-modified-original{
+		padding: 10px;
+		color: white;
+	}
+
+	.last-modified{
+		padding: 10px;
+		color: white;
+	}
+
+	ul.pagination{
+		width: 100%;
+		text-align: center
+	}
+	ul.pagination li{
+		list-style: none;
+		float: left;
+	}
+	ul.pagination li a{
+		padding: 10px;
 	}
 	</style>
 {% endblock extrastyle %}
 
 {% block content %}
-<div ng-app="translationApp" ng-controller="MainController as ctrl">
-	{# If no language is selected, just present the language selector #}
 	{% if not trans_language %}
 	<div class="row-fluid">
-		<div class="span12 full-languages-selector">
+		<div class="span12 text-center full-languages-selector">
 			{% for code in AVAILABLE_LANGUAGES  %}
-				<a href="?l={{ code }}" class="btn btn-default">{{ code }}</a>
+				<a href="?lang={{ code }}" class="btn btn-default">{{ code }}</a>
 			{% endfor %}
 		</div>
 	</div>
 	{% else %}
-	<div class="row-fluid">
-		<div class="span12 languages-selector">
-			{% for code in AVAILABLE_LANGUAGES  %}
-				<a href="?l={{ code }}" class="btn btn-default">{{ code }}</a>
-			{% endfor %}
-		</div>
-	</div>
+		{{ block.super }}
+	{% endif %}
+{% endblock content %}
+
+{% block result_list %}
+<div ng-app="translationApp" ng-controller="MainController as ctrl">
 	<div class="row-fluid">
 		<div class="span12 language-container language-{{ trans_language }}">
 			<h2>{% trans "Translating:" %} {{ trans_language }}</h2>
@@ -80,18 +198,30 @@
 					{% endfor %}
 				</thead>
 				<tbody>
-	{% autopaginate forms 20 %}
-				{% for form in forms %}
+				{% for form in cl.formset.forms %}
 					<tr>
 						<td>
 							{{ form.instance }}	
 						</td>
 						
 						{% for field in form %}
-						<td class="{% is_uptodate form.instance field.name trans_language DEFAULT_LANGUAGE %}">
-							<div class="translated-field {% is_uptodate form.instance field.name trans_language DEFAULT_LANGUAGE %}">{{ field }}</div>
-							<div class="original-field"><p>{% getattrl form.instance field.name DEFAULT_LANGUAGE %}</p></div>
+						{% if field.name|slice:":-3" in trans_fields %}
+						<td class="instance-{{ form.instance.id }} field-{{ field.name }}" ng-class="fieldStatus({{ form.instance.id }}, '{{ field.name }}')">
+							<div class="translated-field" ng-init="setFieldStatus({{ form.instance.id }}, '{{ field.name }}', '{% is_uptodate form.instance field.name|slice:":-3" trans_language DEFAULT_LANGUAGE %}')">{{ field }}</div>
+							<div ng-cloak class="original-field" ng-show="mustShowDefault({{ form.instance.id }}, '{{ field.name }}')">
+								{% autoescape on %}
+								{% getattrl form.instance field.name|slice:":-3" DEFAULT_LANGUAGE %}
+								{% endautoescape %}
+							</div>
+							<div class="pull-left show-default-wrapper"><span ng-click="toggleDefault({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-show"><i class="fa fa-flag"></i></span></div>
+							<div class="save-wrapper pull-right"><span ng-click="saveField({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-save"><i class="fa fa-save"></i></span></div>
+							<div class="updated-wrapper pull-right"><span ng-click="markAsUpdated({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-save"><i class="fa fa-check"></i></span></div>
+							<div class="last-modified pull-right" ng-init="setLastModified({{ form.instance.id }}, '{{ field.name }}', '{% getlastmodifiedl form.instance field.name|slice:":-3" trans_language %}', '{% getlastmodifiedl form.instance field.name|slice:":-3" DEFAULT_LANGUAGE %}')">
+								<span ng-bind="getLastModified({{ form.instance.id }}, '{{ field.name }}')"></span> vs 
+								<span ng-bind="getLastModifiedDefault({{ form.instance.id }}, '{{ field.name }}')"></span>
+							</div>
 						</td>	
+						{% endif %}
 						{% endfor %}
 					</tr>
 				{% endfor %}
@@ -99,7 +229,5 @@
 			</table>
 		</div>
 	</div>
-	<div class="row"><div class="span12">{% paginate %}</div></div>
-	{% endif %}
 </div>
-{% endblock content %}
+{% endblock result_list %}
