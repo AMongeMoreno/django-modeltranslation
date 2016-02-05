@@ -30,6 +30,7 @@ from modeltranslation.widgets import ClearableWidgetWrapper
 # ##################################################################
 # ##################################################################
 import json
+import datetime
 from django.conf.urls import patterns, url
 from django.template.response import TemplateResponse
 from django.core.urlresolvers import reverse
@@ -37,6 +38,9 @@ from django.contrib.admin import SimpleListFilter
 from django.http import HttpResponse
 from modeltranslation.templatetags.modeltranslation_tags import is_uptodate
 from django.utils import timezone
+from django.utils.translation import ugettext as _
+from django.db.models import F, Q
+
 
 class JSONResponse(HttpResponse):
     """
@@ -66,13 +70,80 @@ class TranslationStatusFilter(SimpleListFilter):
     def lookups(self, request, model_admin):
         return (
             ('updated', _('Updated')),
-            ('missing', _('Missing')),
-            ('not-updated', _('Missing')),
-            ('equal', _('Equal')),
+            ('not-updated', _('Not Updated')),
+            ('to-translate', _('To Translate')),
             )
 
     def queryset(self, request, queryset):
-        return queryset
+        if self.value():
+            current_lang = request.GET.get('lang')
+            value = self.value()
+            if value == 'updated':
+                filters = {}
+                for field in self.fields:
+                    last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
+                    last_modified_default = '{0}_{1}_last_modified'.format(
+                        field, mt_settings.DEFAULT_LANGUAGE)
+                    # It is updated if the last_modified is gt the default one
+                    filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
+
+                return queryset.filter(**filters)
+
+            elif value == 'not-updated':
+                filters = {}
+                for field in self.fields:
+                    last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
+                    last_modified_default = '{0}_{1}_last_modified'.format(
+                        field, mt_settings.DEFAULT_LANGUAGE)
+                    # It is updated if the last_modified is gt the default one
+                    filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
+
+                return queryset.exclude(**filters)
+
+            elif value == 'to-translate':
+                # to-translate includes all missing, equal & not-updated
+                filters = []
+                for field in self.fields:
+                    field_lang = '{0}_{1}'.format(field, current_lang)
+                    field_default = '{0}_{1}'.format(field, mt_settings.DEFAULT_LANGUAGE)
+
+                    last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
+                    last_modified_default = '{0}_{1}_last_modified'.format(
+                        field, mt_settings.DEFAULT_LANGUAGE)
+
+                    # It is to-translate if it is missing, equal or not updated
+                    filters.extend([
+                        # Missing
+                        Q(
+                            # Is null or blank
+                            Q(**{'{0}__isnull'.format(field_lang): True}) |
+                            Q(**{'{0}'.format(field_lang): ''}),
+                            # and default is not null and not blank
+                            ~Q(**{'{0}'.format(field_default): ''}),
+                            **{'{0}__isnull'.format(field_default): False}
+                        ),
+                        # Equal
+                        Q(**{
+                            '{0}'.format(field_lang): F(field_default),
+                            '{0}__isnull'.format(field_lang): False
+                            }),
+                        Q(**{
+                            '{0}__isnull'.format(field_lang): True,
+                            '{0}__isnull'.format(field_default): True
+                            }),
+
+                        # Not Updated
+                        Q(**{'{0}__lte'.format(last_modified): F(last_modified_default) + datetime.timedelta(seconds=30)})
+                    ])
+
+                query = filters.pop()
+                for filtr in filters:
+                    query |= filtr
+
+                return queryset.filter(query)
+            return queryset
+        else:
+            return queryset
 
 
 class ModelTranslationPanelMixin(object):
@@ -109,28 +180,39 @@ class ModelTranslationPanelMixin(object):
     def update_translations(self, request, *args, **kwargs):
         # We have to save the updated field
         data = json.loads(request.body)
-
         current_lang = data['lang']
-
         field_name = data['name']
+        new_status = data['status']
 
         instance = self.model.objects.get(pk=data['instance'])
 
         last_modified = 'Unknown'
         if hasattr(instance, '{0}_last_modified'.format(field_name)):
-            now = timezone.now()
-            last_modified = now.strftime('%d-%m-%Y %H:%M:%S')
-            setattr(instance, '{0}_last_modified'.format(field_name), now)
-            instance.save()
+            if new_status == 'updated':
+                now = timezone.now()
+                last_modified = now.strftime('%d-%m-%Y %H:%M:%S')
+                setattr(instance, '{0}_last_modified'.format(field_name), now)
+                instance.save()
+                new_value = getattr(instance, field_name)
+
+            elif new_status == 'not-updated':
+                last_modified_default = getattr(instance, '{0}_{1}_last_modified'.format(
+                    field_name[:-3], mt_settings.DEFAULT_LANGUAGE))
+                last_modified = last_modified_default.strftime('%d-%m-%Y %H:%M:%S')
+                setattr(instance, '{0}_last_modified'.format(field_name), last_modified_default)
+                instance.save()
+                new_value = getattr(instance, field_name)
 
         # Get the new status
-        new_status = is_uptodate(instance, field_name, current_lang, mt_settings.DEFAULT_LANGUAGE)
+        new_status = is_uptodate(
+            instance, field_name[:-3], current_lang, mt_settings.DEFAULT_LANGUAGE)
 
         return JSONResponse({
             'status': new_status,
             'instance_id': instance.pk,
             'field_name': field_name,
             'last_modified': last_modified,
+            'field_value': new_value,
             })
 
     # This is the actual view function that will be executed when accessing the panel
@@ -147,6 +229,7 @@ class ModelTranslationPanelMixin(object):
 
         setattr(instance, field_name, field_value)
         instance.save()
+        new_value = getattr(instance, field_name)
 
         last_modified = 'Unknown'
         if hasattr(instance, '{0}_last_modified'.format(field_name)):
@@ -154,13 +237,14 @@ class ModelTranslationPanelMixin(object):
             last_modified = last_modified.strftime('%d-%m-%Y %H:%M:%S')
 
         # Get the new status
-        new_status = is_uptodate(instance, field_name, current_lang, mt_settings.DEFAULT_LANGUAGE)
+        new_status = is_uptodate(instance, field_name[:-3], current_lang, mt_settings.DEFAULT_LANGUAGE)
 
         return JSONResponse({
             'status': new_status,
             'instance_id': instance.pk,
             'field_name': field_name,
             'last_modified': last_modified,
+            'field_value': new_value,
             })
 
     def translations(self, request, extra_context=None):
@@ -199,7 +283,6 @@ class ModelTranslationPanelMixin(object):
         """
         from django.contrib.admin.options import *
         from django.contrib.admin.views.main import ERROR_FLAG
-        from django.utils.translation import ugettext as _
 
         opts = self.model._meta
         app_label = opts.app_label
@@ -211,7 +294,8 @@ class ModelTranslationPanelMixin(object):
         list_filter = self.get_list_filter(request)
 
         # Include the language filter as a list_filter
-        list_filter = self.list_filter + (LanguageFilter,)
+        TranslationStatusFilter.fields = self.trans_opts.monitored_fields
+        list_filter = self.list_filter + (LanguageFilter, TranslationStatusFilter)
 
         # Check actions to see if any are available on this changelist
         actions = self.get_actions(request)

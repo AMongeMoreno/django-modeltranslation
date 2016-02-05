@@ -16,8 +16,8 @@
 		
 			$scope.saveField = function(instance_id, field_name){
 				// Get the field value
-				var field = angular.element('.instance-' + instance_id + '.field-' + field_name).find('.translated-field').children().first();
-				var value = field.val();
+				var field_input = angular.element('.instance-' + instance_id + '.field-' + field_name).find('.translated-field [name]');
+				var value = field_input.val();
 
 				$http.put('{% url opts|admin_urlname:"process_translations" %}', {
 					'instance': instance_id, 
@@ -30,18 +30,19 @@
 					var field = getField(instance_id, field_name);
 					field.status = data.status;
 					field.lastModified = data.last_modified;
+					field_input.val(data.field_value);
+					debugger;
 				});
 			};
 
-			$scope.markAsUpdated = function(instance_id, field_name){
+			$scope.markStatus = function(instance_id, field_name, new_status){
 				// Get the field value
-				var field = angular.element('.instance-' + instance_id + '.field-' + field_name).find('.translated-field').children().first();
-				var value = field.val();
 
 				$http.put('{% url opts|admin_urlname:"update_translations" %}', {
 					'instance': instance_id, 
 					'name': field_name,
 					'lang': '{{ trans_language }}',
+					'status': new_status,
 				}).then(function(response){
 					// On return, change the status
 					var data = response.data;
@@ -49,6 +50,8 @@
 					field.status = data.status;
 					field.lastModified = data.last_modified;
 
+					var field_input = angular.element('.instance-' + instance_id + '.field-' + field_name).find('.translated-field [name]');
+					field_input.val(data.field_value);
 				});
 			};
 
@@ -117,22 +120,13 @@
 {% block extrastyle %}
 	{{ block.super }}
 	<style type="text/css">
-	[ng:cloak],[ng-cloak],[data-ng-cloak],[x-ng-cloak],.ng-cloak,.x-ng-cloak,.ng-hide:not(.ng-hide-animate){display:none !important;}
+
+	[ng:cloak],[ng-cloak],[data-ng-cloak],[x-ng-cloak],.ng-cloak,.x-ng-cloak,.ng-hide:not(.ng-hide-animate){
+		display:none !important;
+	}
 	
 	.original-field{
-		margin-top: 15px;
-	}
-	.updated input{
-		color: green;
-	}
-	.updated{
-		background-color: #9bcf7d !important;
-	}
-	.not-updated input{
-		color: red;
-	}
-	.not-updated{
-		background-color: #fe8b6c !important;
+		padding: 10px;
 	}
 	.missing input{
 		color: orange;
@@ -145,6 +139,18 @@
 	}
 	.equal{
 		background-color: #9bcf7d !important;
+	}
+	.updated input{
+		color: green;
+	}
+	.updated{
+		background-color: #9bcf7d !important;
+	}
+	.not-updated input{
+		color: red;
+	}
+	.not-updated{
+		background-color: #fe8b6c !important;
 	}
 
 	.last-modified-original{
@@ -207,15 +213,19 @@
 						{% for field in form %}
 						{% if field.name|slice:":-3" in trans_fields %}
 						<td class="instance-{{ form.instance.id }} field-{{ field.name }}" ng-class="fieldStatus({{ form.instance.id }}, '{{ field.name }}')">
-							<div class="translated-field" ng-init="setFieldStatus({{ form.instance.id }}, '{{ field.name }}', '{% is_uptodate form.instance field.name|slice:":-3" trans_language DEFAULT_LANGUAGE %}')">{{ field }}</div>
 							<div ng-cloak class="original-field" ng-show="mustShowDefault({{ form.instance.id }}, '{{ field.name }}')">
 								{% autoescape on %}
 								{% getattrl form.instance field.name|slice:":-3" DEFAULT_LANGUAGE %}
 								{% endautoescape %}
 							</div>
+							<div class="translated-field" ng-init="setFieldStatus({{ form.instance.id }}, '{{ field.name }}', '{% is_uptodate form.instance field.name|slice:":-3" trans_language DEFAULT_LANGUAGE %}')">{{ field }}</div>
 							<div class="pull-left show-default-wrapper"><span ng-click="toggleDefault({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-show"><i class="fa fa-flag"></i></span></div>
+
 							<div class="save-wrapper pull-right"><span ng-click="saveField({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-save"><i class="fa fa-save"></i></span></div>
-							<div class="updated-wrapper pull-right"><span ng-click="markAsUpdated({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-save"><i class="fa fa-check"></i></span></div>
+							
+							<div class="updated-wrapper pull-right"><span ng-click="markStatus({{ form.instance.id }}, '{{ field.name }}', 'not-updated')" class="btn btn-save"><i class="fa fa-times"></i></span></div>
+							<div class="updated-wrapper pull-right"><span ng-click="markStatus({{ form.instance.id }}, '{{ field.name }}', 'updated')" class="btn btn-save"><i class="fa fa-check"></i></span></div> 
+							
 							<div class="last-modified pull-right" ng-init="setLastModified({{ form.instance.id }}, '{{ field.name }}', '{% getlastmodifiedl form.instance field.name|slice:":-3" trans_language %}', '{% getlastmodifiedl form.instance field.name|slice:":-3" DEFAULT_LANGUAGE %}')">
 								<span ng-bind="getLastModified({{ form.instance.id }}, '{{ field.name }}')"></span> vs 
 								<span ng-bind="getLastModifiedDefault({{ form.instance.id }}, '{{ field.name }}')"></span>

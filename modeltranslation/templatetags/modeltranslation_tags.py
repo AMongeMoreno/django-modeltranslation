@@ -36,23 +36,31 @@ def getattribute(obj, field_name):
 
 @register.simple_tag(name="is_uptodate")
 def is_uptodate(obj, field, lang, default_language):
-    if hasattr(obj, '{0}_{1}_last_modified'.format(field, lang)):
-        field_value_en = getattr(obj, '{0}_{1}'.format(field, default_language))
-        field_value_lang = getattr(obj, '{0}_{1}'.format(field, lang))
-        # Finally check if is None and the default is not
-        if not field_value_lang and field_value_en:
-            return 'missing'
+    status = []
 
+    field_value_en = getattr(obj, '{0}_{1}'.format(field, default_language))
+    field_value_lang = getattr(obj, '{0}_{1}'.format(field, lang))
+    # import ipdb; ipdb.set_trace()
+    # Finally check if is None and the default is not
+    if not field_value_lang and field_value_en:
+        status.append('missing')
+    # import ipdb; ipdb.set_trace()
+    # Check if the content is equal to the default one
+    if (field_value_lang or '') == (field_value_en or ''):
+        status.append('equal')
+
+    if hasattr(obj, '{0}_{1}_last_modified'.format(field, lang)):
         last_modified_en = getattr(obj, '{0}_{1}_last_modified'.format(field, default_language))
         last_modified_lang = getattr(obj, '{0}_{1}_last_modified'.format(field, lang))
 
         # If this language was modified before the english one
         if last_modified_lang - last_modified_en < timedelta(seconds=30):
-            return 'not-updated'
+            status.append('not-updated')
+        else:
+            status.append('updated')
+    else:
+        # If there is no last_modified field, we have to guess that is up to date
+        status.append('updated')
 
-        # Check if the content is equal to the default one
-        if field_value_lang == field_value_en:
-            return 'equal'
-
-    # If there is no last_modified field, we have to guess that is up to date
-    return 'updated'
+    # Return all the status labels:
+    return ' '.join(status)
