@@ -71,7 +71,7 @@ class TranslationStatusFilter(SimpleListFilter):
         return (
             ('updated', _('Updated')),
             ('not-updated', _('Not Updated')),
-            ('to-translate', _('To Translate')),
+            # ('to-translate', _('To Translate')),
             )
 
     def queryset(self, request, queryset):
@@ -100,48 +100,48 @@ class TranslationStatusFilter(SimpleListFilter):
 
                 return queryset.exclude(**filters)
 
-            elif value == 'to-translate':
-                # to-translate includes all missing, equal & not-updated
-                filters = []
-                for field in self.fields:
-                    field_lang = '{0}_{1}'.format(field, current_lang)
-                    field_default = '{0}_{1}'.format(field, mt_settings.DEFAULT_LANGUAGE)
+            # elif value == 'to-translate':
+            #     # to-translate includes all missing, equal & not-updated
+            #     filters = []
+            #     for field in self.fields:
+            #         field_lang = '{0}_{1}'.format(field, current_lang)
+            #         field_default = '{0}_{1}'.format(field, mt_settings.DEFAULT_LANGUAGE)
 
-                    last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
-                    last_modified_default = '{0}_{1}_last_modified'.format(
-                        field, mt_settings.DEFAULT_LANGUAGE)
+            #         last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
+            #         last_modified_default = '{0}_{1}_last_modified'.format(
+            #             field, mt_settings.DEFAULT_LANGUAGE)
 
-                    # It is to-translate if it is missing, equal or not updated
-                    filters.extend([
-                        # Missing
-                        Q(
-                            # Is null or blank
-                            Q(**{'{0}__isnull'.format(field_lang): True}) |
-                            Q(**{'{0}'.format(field_lang): ''}),
-                            # and default is not null and not blank
-                            ~Q(**{'{0}'.format(field_default): ''}),
-                            **{'{0}__isnull'.format(field_default): False}
-                        ),
-                        # Equal
-                        Q(**{
-                            '{0}'.format(field_lang): F(field_default),
-                            '{0}__isnull'.format(field_lang): False
-                            }),
-                        Q(**{
-                            '{0}__isnull'.format(field_lang): True,
-                            '{0}__isnull'.format(field_default): True
-                            }),
+            #         # It is to-translate if it is missing, equal or not updated
+            #         filters.extend([
+            #             # Missing
+            #             Q(
+            #                 # Is null or blank
+            #                 Q(**{'{0}__isnull'.format(field_lang): True}) |
+            #                 Q(**{'{0}'.format(field_lang): ''}),
+            #                 # and default is not null and not blank
+            #                 ~Q(**{'{0}'.format(field_default): ''}),
+            #                 **{'{0}__isnull'.format(field_default): False}
+            #             ),
+            #             # Equal
+            #             Q(**{
+            #                 '{0}'.format(field_lang): F(field_default),
+            #                 '{0}__isnull'.format(field_lang): False
+            #                 }),
+            #             Q(**{
+            #                 '{0}__isnull'.format(field_lang): True,
+            #                 '{0}__isnull'.format(field_default): True
+            #                 }),
 
-                        # Not Updated
-                        Q(**{'{0}__lte'.format(last_modified): F(last_modified_default) + datetime.timedelta(seconds=30)})
-                    ])
+            #             # Not Updated
+            #             Q(**{'{0}__lte'.format(last_modified): F(last_modified_default) + datetime.timedelta(seconds=30)})
+            #         ])
 
-                query = filters.pop()
-                for filtr in filters:
-                    query |= filtr
+            #     query = filters.pop()
+            #     for filtr in filters:
+            #         query |= filtr
 
-                return queryset.filter(query)
-            return queryset
+            #     return queryset.filter(query)
+            # return queryset
         else:
             return queryset
 
@@ -429,6 +429,19 @@ class ModelTranslationPanelMixin(object):
             'preserved_filters': self.get_preserved_filters(request),
         })
         context.update(extra_context or {})
+
+        filters = {}
+        # Now lets count the number of results for each kind
+        for field in self.trans_opts.monitored_fields:
+            last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
+            last_modified_default = '{0}_{1}_last_modified'.format(
+                field, mt_settings.DEFAULT_LANGUAGE)
+            # It is updated if the last_modified is gt the default one
+            filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
+
+        all_queryset = self.model._default_manager.all()
+        context["translated_count"] = all_queryset.filter(**filters).count()
+        context["not_translated_count"] = all_queryset.exclude(**filters).count()
 
         return TemplateResponse(request, [self.model_translations_template_name],
                                 context, current_app=self.admin_site.name)
