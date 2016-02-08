@@ -139,25 +139,25 @@
 		color: orange;
 	}
 	.missing{
-		background-color: #ff9d60 !important;
+		background-color: #fcf8e3 !important;
 	}
 	.equal input{
 		color: blue;
 	}
 	.equal{
-		background-color: #9bcf7d !important;
+		background-color: #d9edf7 !important;
 	}
 	.updated input{
 		color: green;
 	}
 	.updated{
-		background-color: #9bcf7d !important;
+		background-color: #dff0d8 !important;
 	}
 	.not-updated input{
 		color: red;
 	}
 	.not-updated{
-		background-color: #fe8b6c !important;
+		background-color: #f2dede !important;
 	}
 
 	.last-modified-original{
@@ -237,8 +237,11 @@
 							</div>
 							<div class="translated-field" ng-init="setFieldStatus({{ form.instance.id }}, '{{ field.name }}', '{% is_uptodate form.instance field.name|slice:":-3" trans_language DEFAULT_LANGUAGE %}')">{{ field }}</div>
 							<div class="pull-left show-default-wrapper"><span ng-click="toggleDefault({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-show"><i class="fa fa-flag" title="{% trans "Show Original" %}"></i></span></div>
+							{% comment %}
+								
 							<div class="pull-left copy-wrapper"><span ng-click="copyOriginal({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-copy"><i class="fa fa-copy" title="{% trans "Copy Original" %}" ></i></span></div>
 
+							{% endcomment %}
 							<div class="save-wrapper pull-right"><span ng-click="saveField({{ form.instance.id }}, '{{ field.name }}')" class="btn btn-save"><i class="fa fa-save" title="{% trans "Save changes" %}"></i></span></div>
 							
 							<div class="updated-wrapper pull-right"><span ng-click="markStatus({{ form.instance.id }}, '{{ field.name }}', 'not-updated')" class="btn btn-save"><i class="fa fa-times" title="{% trans "Set as not updated" %}"></i></span></div>

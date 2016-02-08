@@ -10,6 +10,25 @@ def pdb(element):
     return element
 
 
+@register.filter
+def keyvalue(obj, key):
+    return obj[key]
+
+
+@register.simple_tag(name="translation_status")
+def translation_status(model, language):
+    lang_status = model['languages'][language]
+    total = lang_status['total']
+    if lang_status['translated'] < (total / 4):
+        return 'bad'
+    elif lang_status['translated'] < (total / 2):
+        return 'regular'
+    elif lang_status['translated'] < (total * 3 / 4):
+        return 'almost'
+    else:
+        return 'updated'
+
+
 @register.simple_tag(name="getattrl")
 def getattribute_lang(obj, field_name, lang_code):
     return getattr(obj, '{0}_{1}'.format(field_name, lang_code), None) or ''

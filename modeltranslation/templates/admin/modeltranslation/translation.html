@@ -1,0 +1,85 @@
+{% extends "admin/base_site.html" %}
+
+{% load modeltranslation_tags %}
+
+
+{% block extrajs %}
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/2.3.2/js/bootstrap.min.js"></script>
+{% endblock extrajs %}
+
+{% block extrastyle %}
+	{{ block.super }}
+
+	<style type="text/css">
+
+	.fluid-container{
+		position: relative;
+	}
+	.item{
+		width: 15%;
+		min-height: 100px;
+		margin: 20px;
+		padding: 15px;
+		background-color: #FFFFFF;
+		float: left;
+
+		box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.2), 0 1px 1px 0 rgba(0, 0, 0, 0.14), 0 2px 1px -1px rgba(0, 0, 0, 0.12);
+		border-radius: 2px;
+	}
+
+	.updated{
+		background-color: #dff0d8;
+	}
+	.bad{
+		background-color: #f2dede;
+	}
+	.regular{
+		background-color: #fcf8e3;
+	}
+	.almost{
+		background-color: #d9edf7;
+	}
+
+	</style>
+{% endblock extrastyle %}
+
+
+{% block content %}
+	<div class="fuild-container">
+		<ul class="nav nav-pills">
+			{% for lang_code in AVAILABLE_LANGUAGES %}
+			  <li {% if forloop.first %}class="active"{% endif %}><a href="#tab-{{ lang_code }}" data-toggle="tab">{{ lang_code }}</a></li>
+		  	{% endfor %}
+		</ul>
+		<div class="tab-content">
+			{% for lang_code in AVAILABLE_LANGUAGES %}
+				<div id="tab-{{ lang_code }}" class="tab-pane {% if forloop.first %} active {% endif %} {{ lang_code }}-tab">
+					<div class="tab-body">
+						<h2>Language: {{ lang_code }}</h2>
+						<div class="items-container">
+						{% for model in models %}
+							<div class="item {% translation_status model lang_code %}" >
+								<h2 class="text-center">{{ model.name }}</h2>
+
+								<div class="">
+									<span>Translated {{ model.languages|keyvalue:lang_code|keyvalue:'translated' }}</span> 
+								</div>
+								<div class="">	
+									<span>To Translate {{ model.languages|keyvalue:lang_code|keyvalue:'to_translate' }}</span>
+								</div>
+								<div class="">
+									<span>Total: {{ model.languages|keyvalue:lang_code|keyvalue:'total' }}</span>
+								</div>
+								<div class="">
+									<a href="{{ model.languages|keyvalue:lang_code|keyvalue:'url' }}" class="btn"> Go to translate </a>
+								</div>
+
+							</div>
+						{% endfor %}
+						</div>
+					</div>
+				</div>
+			{% endfor %}
+		</div>	
+	</div>
+{% endblock content %}

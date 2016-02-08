@@ -29,6 +29,7 @@ from modeltranslation.widgets import ClearableWidgetWrapper
 # ###################### Translation panel #########################
 # ##################################################################
 # ##################################################################
+
 import json
 import datetime
 from django.conf.urls import patterns, url
@@ -79,26 +80,10 @@ class TranslationStatusFilter(SimpleListFilter):
             current_lang = request.GET.get('lang')
             value = self.value()
             if value == 'updated':
-                filters = {}
-                for field in self.fields:
-                    last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
-                    last_modified_default = '{0}_{1}_last_modified'.format(
-                        field, mt_settings.DEFAULT_LANGUAGE)
-                    # It is updated if the last_modified is gt the default one
-                    filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
-
-                return queryset.filter(**filters)
+                return queryset_updated(queryset, self.fields, current_lang)
 
             elif value == 'not-updated':
-                filters = {}
-                for field in self.fields:
-                    last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
-                    last_modified_default = '{0}_{1}_last_modified'.format(
-                        field, mt_settings.DEFAULT_LANGUAGE)
-                    # It is updated if the last_modified is gt the default one
-                    filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
-
-                return queryset.exclude(**filters)
+                return queryset_not_updated(queryset, self.fields, current_lang)
 
             # elif value == 'to-translate':
             #     # to-translate includes all missing, equal & not-updated
@@ -144,6 +129,87 @@ class TranslationStatusFilter(SimpleListFilter):
             # return queryset
         else:
             return queryset
+
+
+def queryset_updated(queryset, fields, lang):
+    filters = {}
+    for field in fields:
+        last_modified = '{0}_{1}_last_modified'.format(field, lang)
+        last_modified_default = '{0}_{1}_last_modified'.format(
+            field, mt_settings.DEFAULT_LANGUAGE)
+        # It is updated if the last_modified is gt the default one
+        filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
+
+    return queryset.filter(**filters)
+
+
+def queryset_not_updated(queryset, fields, lang):
+    filters = {}
+    for field in fields:
+        last_modified = '{0}_{1}_last_modified'.format(field, lang)
+        last_modified_default = '{0}_{1}_last_modified'.format(
+            field, mt_settings.DEFAULT_LANGUAGE)
+        # It is updated if the last_modified is gt the default one
+        filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
+
+    return queryset.exclude(**filters)
+
+
+def modeltranslation_panel_view(request, *args, **kwargs):
+    """
+        Custom view for a generic panel showing all classes registered and their status
+    """
+
+    translations_template_name = "admin/modeltranslation/translation.html"
+
+    context = {}
+
+    context['AVAILABLE_LANGUAGES'] = mt_settings.AVAILABLE_LANGUAGES
+    context['LANGUAGES'] = settings.LANGUAGES
+    context['DEFAULT_LANGUAGE'] = mt_settings.DEFAULT_LANGUAGE
+
+    # We get all registered models
+    from modeltranslation.translator import translator
+    models = translator.get_registered_models()
+
+    models_info = []
+    for model in models:
+        model_options = translator.get_options_for_model(model)
+        fields = model_options.monitored_fields
+        if len(fields) > 0:
+            instances = model._default_manager.all()
+
+            languages = {}
+
+            for lang in mt_settings.AVAILABLE_LANGUAGES:
+                translated_instances = queryset_updated(
+                    instances, fields, lang)
+                not_translated_instances = queryset_not_updated(
+                    instances, fields, lang)
+
+                app_label = model._meta.app_label
+                try:
+                    model_info = (app_label, model._meta.model_name,)
+                except AttributeError:
+                    model_info = (app_label, model._meta.module_name,)
+
+                languages[lang] = {
+                    'translated': translated_instances.count(),
+                    'to_translate': not_translated_instances.count(),
+                    'total': instances.count(),
+                    'url': reverse('admin:%s_%s_translations' % model_info) + '?lang=' + lang + '&translation=not-updated',
+                }
+
+            models_info.append({
+                'name': model.__name__,
+                'languages': languages,
+            })
+
+    context['models'] = models_info
+
+    return TemplateResponse(
+        request, [translations_template_name],
+        context)
 
 
 class ModelTranslationPanelMixin(object):
