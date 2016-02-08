@@ -275,7 +275,21 @@ class ModelTranslationPanelMixin(object):
 
             request.GET = query_parameters
 
-            # Get the formset
+            filters = {}
+
+            # Now lets count the number of results for each kind
+            for field in self.trans_opts.monitored_fields:
+                last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
+                last_modified_default = '{0}_{1}_last_modified'.format(
+                    field, mt_settings.DEFAULT_LANGUAGE)
+                # It is updated if the last_modified is gt the default one
+                filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
+
+            all_queryset = self.model._default_manager.all()
+            context["translated_count"] = all_queryset.filter(**filters).count()
+            context["not_translated_count"] = all_queryset.exclude(**filters).count()
+
+            # Set the list of editable fields
             self.list_editable = list(['{0}_{1}'.format(field, current_lang) for field in field_names])
 
         """
@@ -429,19 +443,6 @@ class ModelTranslationPanelMixin(object):
             'preserved_filters': self.get_preserved_filters(request),
         })
         context.update(extra_context or {})
-
-        filters = {}
-        # Now lets count the number of results for each kind
-        for field in self.trans_opts.monitored_fields:
-            last_modified = '{0}_{1}_last_modified'.format(field, current_lang)
-            last_modified_default = '{0}_{1}_last_modified'.format(
-                field, mt_settings.DEFAULT_LANGUAGE)
-            # It is updated if the last_modified is gt the default one
-            filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
-
-        all_queryset = self.model._default_manager.all()
-        context["translated_count"] = all_queryset.filter(**filters).count()
-        context["not_translated_count"] = all_queryset.exclude(**filters).count()
 
         return TemplateResponse(request, [self.model_translations_template_name],
                                 context, current_app=self.admin_site.name)
