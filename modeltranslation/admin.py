@@ -37,10 +37,16 @@ from django.template.response import TemplateResponse
 from django.core.urlresolvers import reverse
 from django.contrib.admin import SimpleListFilter
 from django.http import HttpResponse
-from modeltranslation.templatetags.modeltranslation_tags import is_uptodate
 from django.utils import timezone
 from django.utils.translation import ugettext as _
 from django.db.models import F, Q
+from modeltranslation.templatetags.modeltranslation_tags import is_uptodate
+from modeltranslation.translator import translator
+
+try:
+    from django.apps.apps import get_model
+except:
+    from django.db.models.loading import get_model 
 
 
 class JSONResponse(HttpResponse):
@@ -155,7 +161,7 @@ def queryset_not_updated(queryset, fields, lang):
     return queryset.exclude(**filters)
 
 
-def modeltranslation_panel_view(request, *args, **kwargs):
+def modeltranslation_panel_view(request, models=None, exclude=None, **kwargs):
     """
         Custom view for a generic panel showing all classes registered and their status
     """
@@ -168,24 +174,47 @@ def modeltranslation_panel_view(request, *args, **kwargs):
     context['LANGUAGES'] = settings.LANGUAGES
     context['DEFAULT_LANGUAGE'] = mt_settings.DEFAULT_LANGUAGE
 
+    include_models = []
     # We get all registered models
-    from modeltranslation.translator import translator
-    models = translator.get_registered_models()
+    if models is not None:
+        for mod in models:
+            if isinstance(mod, unicode) or isinstance(mod, str):
+                model_info = mod.split('.')
+                model = get_model(app_label=model_info[0], model_name=model_info[1])
+            else:
+                model = model
+
+            include_models.append(model)
+
+    else:
+        include_models = translator.get_registered_models()
+
+    if exclude is not None:
+        for exc in exclude:
+            if isinstance(exc, unicode) or isinstance(exc, str):
+                model_info = exc.split('.')
+                model = get_model(app_label=model_info[0], model_name=model_info[1])
+            else:
+                model = exc
+
+            if model in include_models:
+                include_models.remove(model)
 
     models_info = []
-    for model in models:
+    for model in include_models:
         model_options = translator.get_options_for_model(model)
-        fields = model_options.monitored_fields
-        if len(fields) > 0:
-            instances = model._default_manager.all()
+        translation_fields = model_options.get_translation_fields()
+        if len(translation_fields) > 0:
+            qs = model._default_manager.all()
+            instances = model_options.get_translation_queryset(qs)
 
             languages = {}
 
             for lang in mt_settings.AVAILABLE_LANGUAGES:
                 translated_instances = queryset_updated(
-                    instances, fields, lang)
+                    instances, translation_fields, lang)
                 not_translated_instances = queryset_not_updated(
-                    instances, fields, lang)
+                    instances, translation_fields, lang)
 
                 app_label = model._meta.app_label
                 try:
@@ -216,8 +245,6 @@ class ModelTranslationPanelMixin(object):
 
     model_translations_template_name = 'admin/modeltranslation/model_translations.html'
 
-    translation_field_order = None
-
     def get_model_info(self):
         # module_name is renamed to model_name in Django 1.8
         app_label = self.model._meta.app_label
@@ -225,6 +252,15 @@ class ModelTranslationPanelMixin(object):
             return (app_label, self.model._meta.model_name,)
         except AttributeError:
             return (app_label, self.model._meta.module_name,)
+
+    def get_queryset(self, request):
+        super_qs = super(ModelTranslationPanelMixin, self).get_queryset(request)
+        view_name = request.resolver_match.view_name
+        # For the translations_view, we filter using the given parameters
+        if view_name.endswith('_translations'):
+            return self.trans_opts.get_translation_queryset(super_qs)
+
+        return super_qs
 
     def get_urls(self):
         urls = super(ModelTranslationPanelMixin, self).get_urls()
@@ -326,11 +362,6 @@ class ModelTranslationPanelMixin(object):
         context['DEFAULT_LANGUAGE'] = mt_settings.DEFAULT_LANGUAGE
 
         context['model'] = self.model
-        field_names = self.trans_opts.get_field_names()
-        if self.translation_field_order is not None:
-            field_names = list(self.translation_field_order) + [x for x in field_names if x not in self.translation_field_order]
-
-        context['trans_fields'] = field_names
         context['trans_monitored_fields'] = self.trans_opts.monitored_fields
 
         query_parameters = request.GET.copy()
@@ -351,12 +382,16 @@ class ModelTranslationPanelMixin(object):
                 # It is updated if the last_modified is gt the default one
                 filters['{0}__gt'.format(last_modified)] = F(last_modified_default) + datetime.timedelta(seconds=30)
 
-            all_queryset = self.model._default_manager.all()
+            all_queryset = self.get_queryset(request)
             context["translated_count"] = all_queryset.filter(**filters).count()
             context["not_translated_count"] = all_queryset.exclude(**filters).count()
 
             # Set the list of editable fields
-            self.list_editable = list(['{0}_{1}'.format(field, current_lang) for field in field_names])
+            translation_fields = self.trans_opts.get_translation_fields()
+            context['trans_fields'] = translation_fields
+
+            # List editable, we need to add the language
+            self.list_editable = list(['{0}_{1}'.format(field, current_lang) for field in translation_fields])
 
         """
             From django.contrib.admin.options.BaseModelAdmin
@@ -374,7 +409,7 @@ class ModelTranslationPanelMixin(object):
         list_filter = self.get_list_filter(request)
 
         # Include the language filter as a list_filter
-        TranslationStatusFilter.fields = self.trans_opts.monitored_fields
+        TranslationStatusFilter.fields = self.trans_opts.get_translation_fields()
         list_filter = self.list_filter + (LanguageFilter, TranslationStatusFilter)
 
         # Check actions to see if any are available on this changelist

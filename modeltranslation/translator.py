@@ -122,6 +122,37 @@ class TranslationOptions(with_metaclass(FieldsAggregationMetaClass, object)):
         """
         return list(self.fields.keys()) + self.related_fields
 
+    # AMM
+    def get_translation_queryset(self, queryset=None):
+        # Return the same queryset by default
+        if queryset is None:
+            return self.model._default_manager.all()
+
+        return queryset
+
+    def get_translation_fields(self):
+        """
+        Return name of all fields that will be taken into account for translation panels
+        """
+        # Set the list of editable fields
+        translation_fields = self.monitored_fields
+
+        # Control fields by subclassing
+        if getattr(self, 'translation_fields', None) is not None:
+            translation_fields = self.translation_fields
+
+        # Control exclude fields by subclassing
+        if getattr(self, 'translation_fields_exclude', None) is not None:
+            for exclude in self.translation_fields_exclude:
+                if exclude in translation_fields:
+                    translation_fields.remove(exclude)
+
+        # Control the fields order by subclassing
+        if getattr(self, 'translation_fields_order', None) is not None:
+            translation_fields = list(self.translation_fields_order) + [x for x in translation_fields if x not in self.translation_fields_order]
+
+        return translation_fields
+
     def __str__(self):
         local = tuple(self.local_fields.keys())
         inherited = tuple(set(self.fields.keys()) - set(local))
@@ -187,7 +218,6 @@ def has_custom_queryset(manager):
     # invalidated (by model._meta.add_field() function). Otherwise, we need to do it manually.
     if len(opts.local_fields) == 0:
         model._meta._fill_fields_cache()
-
 
 
 def add_manager(model):
