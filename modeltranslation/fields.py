@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 from django import VERSION
 from django import forms
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
 from django.db.models import fields
 from django.utils import six, timezone
+from django.db import models
 
 from modeltranslation import settings as mt_settings
 from modeltranslation.utils import (
@@ -294,13 +295,17 @@ class TranslationField(object):
         # Here we just saved the translated field, so we have to update the last_modified (if present)
         if not add and hasattr(model_instance, '{0}_last_modified'.format(self.name)):
             # Check if this field has changed
-            db_model_instance = model_instance._default_manager.get(pk=model_instance.pk)
+            try:
+                db_model_instance = model_instance._default_manager.get(pk=model_instance.pk)
+            except ObjectDoesNotExist:
+                db_model_instance = None
 
-            # If the info has changed, we need to update the last_modified field
-            is_dirty = getattr(db_model_instance, self.name) != getattr(model_instance, self.name)
-            if is_dirty:
-                now = timezone.now()
-                setattr(model_instance, '{0}_last_modified'.format(self.name), now)
+            if db_model_instance is not None:
+                # If the info has changed, we need to update the last_modified field
+                is_dirty = getattr(db_model_instance, self.name) != getattr(model_instance, self.name)
+                if is_dirty:
+                    now = timezone.now()
+                    setattr(model_instance, '{0}_last_modified'.format(self.name), now)
 
         return super(TranslationField, self).pre_save(model_instance, add)
 
